@@ -60,9 +60,9 @@ st.markdown("""
 def load_model():
     """Load the trained model and encoders"""
     try:
-        model = joblib.load('saved_model/warfarin_bleeding_rf_model.pkl')
-        label_encoders = joblib.load('saved_model/label_encoders.pkl')
-        feature_columns = joblib.load('saved_model/feature_columns.pkl')
+        model = joblib.load('warfarin_bleeding_rf_model.pkl')
+        label_encoders = joblib.load('label_encoders.pkl')
+        feature_columns = joblib.load('feature_columns.pkl')
         return model, label_encoders, feature_columns
     except FileNotFoundError:
         st.error("❌ Model files not found. Please ensure the model is trained and saved in the 'saved_model' directory.")
