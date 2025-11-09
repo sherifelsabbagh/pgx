@@ -5,6 +5,10 @@ import joblib
 from sklearn.ensemble import RandomForestClassifier
 import plotly.graph_objects as go
 import plotly.express as px
+import sys
+
+# Check Python version
+st.sidebar.markdown(f"**Python Version:** {sys.version}")
 
 # Set page configuration
 st.set_page_config(
@@ -47,12 +51,6 @@ st.markdown("""
         text-align: center;
         font-weight: bold;
     }
-    .feature-importance {
-        background-color: #f0f2f6;
-        padding: 15px;
-        border-radius: 10px;
-        margin: 10px 0;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -60,52 +58,64 @@ st.markdown("""
 def load_model():
     """Load the trained model and encoders"""
     try:
-        model = joblib.load('warfarin_bleeding_rf_model.pkl')
-        label_encoders = joblib.load('label_encoders.pkl')
-        feature_columns = joblib.load('feature_columns.pkl')
+        model = joblib.load('saved_model/warfarin_bleeding_rf_model.pkl')
+        label_encoders = joblib.load('saved_model/label_encoders.pkl')
+        feature_columns = joblib.load('saved_model/feature_columns.pkl')
+        st.sidebar.success("✅ Model loaded successfully")
         return model, label_encoders, feature_columns
-    except FileNotFoundError:
-        st.error("❌ Model files not found. Please ensure the model is trained and saved in the 'saved_model' directory.")
+    except FileNotFoundError as e:
+        st.sidebar.error(f"❌ Model files not found: {e}")
+        st.sidebar.info("Please ensure the model is trained and saved in the 'saved_model' directory")
+        return None, None, None
+    except Exception as e:
+        st.sidebar.error(f"❌ Error loading model: {e}")
         return None, None, None
 
 def predict_bleeding_risk(patient_data, model, label_encoders, feature_columns):
     """Predict bleeding risk for a new patient"""
-    # Convert to DataFrame
-    patient_df = pd.DataFrame([patient_data])
-    
-    # Encode categorical variables
-    for col in ['sex', 'cyp2c9_genotype', 'vkorc1_genotype']:
-        if col in patient_df.columns and col in label_encoders:
-            patient_df[col] = label_encoders[col].transform([patient_data[col]])[0]
-    
-    # Ensure all features are present and in correct order
-    for feature in feature_columns:
-        if feature not in patient_df.columns:
-            patient_df[feature] = 0
-    
-    patient_features = patient_df[feature_columns]
-    
-    # Make prediction
-    probability = model.predict_proba(patient_features)[0, 1]
-    prediction = model.predict(patient_features)[0]
-    
-    # Determine risk category
-    if probability > 0.3:
-        risk_category = "High"
-        recommendation = "🚨 High Risk - Consider dose adjustment, frequent monitoring, or alternative therapy"
-    elif probability > 0.15:
-        risk_category = "Medium"
-        recommendation = "⚠️ Medium Risk - Increased monitoring recommended"
-    else:
-        risk_category = "Low"
-        recommendation = "✅ Low Risk - Standard monitoring appropriate"
-    
-    return {
-        'bleeding_probability': probability,
-        'risk_category': risk_category,
-        'prediction': 'Major Bleeding' if prediction == 1 else 'No Major Bleeding',
-        'recommendation': recommendation
-    }
+    try:
+        # Convert to DataFrame
+        patient_df = pd.DataFrame([patient_data])
+        
+        # Encode categorical variables
+        for col in ['sex', 'cyp2c9_genotype', 'vkorc1_genotype']:
+            if col in patient_df.columns and col in label_encoders:
+                patient_df[col] = label_encoders[col].transform([patient_data[col]])[0]
+        
+        # Ensure all features are present and in correct order
+        for feature in feature_columns:
+            if feature not in patient_df.columns:
+                patient_df[feature] = 0
+        
+        patient_features = patient_df[feature_columns]
+        
+        # Make prediction
+        probability = model.predict_proba(patient_features)[0, 1]
+        prediction = model.predict(patient_features)[0]
+        
+        # Determine risk category
+        if probability > 0.3:
+            risk_category = "High"
+            recommendation = "🚨 High Risk - Consider dose adjustment, frequent monitoring, or alternative therapy"
+        elif probability > 0.15:
+            risk_category = "Medium"
+            recommendation = "⚠️ Medium Risk - Increased monitoring recommended"
+        else:
+            risk_category = "Low"
+            recommendation = "✅ Low Risk - Standard monitoring appropriate"
+        
+        return {
+            'bleeding_probability': probability,
+            'risk_category': risk_category,
+            'prediction': 'Major Bleeding' if prediction == 1 else 'No Major Bleeding',
+            'recommendation': recommendation,
+            'success': True
+        }
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e)
+        }
 
 def create_risk_gauge(probability):
     """Create a gauge chart for risk visualization"""
@@ -138,10 +148,34 @@ def main():
     st.markdown('<div class="main-header">💊 Warfarin Bleeding Risk Predictor</div>', unsafe_allow_html=True)
     st.markdown("### Egyptian Population Pharmacogenomics Model")
     
+    # Sidebar info
+    st.sidebar.markdown("### ℹ️ About")
+    st.sidebar.info("""
+    This tool predicts the risk of major bleeding in Egyptian patients 
+    taking warfarin using clinical and genetic factors.
+    
+    **Features used:**
+    - Demographic data
+    - Clinical history
+    - Pharmacogenomics (CYP2C9, VKORC1)
+    - Treatment metrics
+    """)
+    
     # Load model
     model, label_encoders, feature_columns = load_model()
     
     if model is None:
+        st.warning("""
+        ⚠️ **Model not loaded** 
+        
+        Please ensure you have:
+        1. Trained the model using the training script
+        2. Saved the model files in the 'saved_model' directory
+        3. Files required:
+           - warfarin_bleeding_rf_model.pkl
+           - label_encoders.pkl  
+           - feature_columns.pkl
+        """)
         st.stop()
     
     # Create two columns for layout
@@ -213,84 +247,90 @@ def main():
             with st.spinner("Calculating bleeding risk..."):
                 result = predict_bleeding_risk(patient_data, model, label_encoders, feature_columns)
             
-            # Display results
-            probability = result['bleeding_probability']
-            risk_category = result['risk_category']
-            
-            # Risk Gauge
-            st.plotly_chart(create_risk_gauge(probability), use_container_width=True)
-            
-            # Risk Category
-            st.markdown(f"### Risk Category: {risk_category}")
-            
-            if risk_category == "High":
-                st.markdown('<div class="risk-high">🚨 HIGH BLEEDING RISK</div>', unsafe_allow_html=True)
-            elif risk_category == "Medium":
-                st.markdown('<div class="risk-medium">⚠️ MEDIUM BLEEDING RISK</div>', unsafe_allow_html=True)
+            if not result['success']:
+                st.error(f"❌ Prediction failed: {result['error']}")
             else:
-                st.markdown('<div class="risk-low">✅ LOW BLEEDING RISK</div>', unsafe_allow_html=True)
-            
-            # Probability
-            st.metric("Bleeding Probability", f"{probability:.1%}")
-            
-            # Recommendation
-            st.markdown("### 💡 Clinical Recommendation")
-            st.info(result['recommendation'])
-            
-            # Feature Importance Explanation
-            st.markdown("### 🔍 Key Risk Factors")
-            feature_importance = pd.DataFrame({
-                'feature': feature_columns,
-                'importance': model.feature_importances_
-            }).sort_values('importance', ascending=False)
-            
-            # Display top risk factors for this patient
-            top_factors = []
-            if previous_bleeding:
-                top_factors.append("📌 Previous bleeding history")
-            if liver_disease:
-                top_factors.append("📌 Liver disease")
-            if renal_disease:
-                top_factors.append("📌 Renal disease")
-            if amiodarone_use:
-                top_factors.append("📌 Amiodarone use")
-            if antiplatelet_use:
-                top_factors.append("📌 Antiplatelet medication use")
-            if most_recent_inr > 3.0:
-                top_factors.append(f"📌 High INR ({most_recent_inr})")
-            if cyp2c9_genotype in ["*1/*3", "*2/*2", "*2/*3", "*3/*3"]:
-                top_factors.append(f"📌 CYP2C9 {cyp2c9_genotype} (poor metabolizer)")
-            if vkorc1_genotype in ["AG", "AA"]:
-                top_factors.append(f"📌 VKORC1 {vkorc1_genotype} (high sensitivity)")
-            
-            if top_factors:
-                for factor in top_factors[:5]:  # Show top 5 factors
-                    st.write(factor)
-            else:
-                st.write("✅ No major risk factors identified")
+                # Display results
+                probability = result['bleeding_probability']
+                risk_category = result['risk_category']
+                
+                # Risk Gauge
+                st.plotly_chart(create_risk_gauge(probability), use_container_width=True)
+                
+                # Risk Category
+                st.markdown(f"### Risk Category: {risk_category}")
+                
+                if risk_category == "High":
+                    st.markdown('<div class="risk-high">🚨 HIGH BLEEDING RISK</div>', unsafe_allow_html=True)
+                elif risk_category == "Medium":
+                    st.markdown('<div class="risk-medium">⚠️ MEDIUM BLEEDING RISK</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div class="risk-low">✅ LOW BLEEDING RISK</div>', unsafe_allow_html=True)
+                
+                # Probability
+                st.metric("Bleeding Probability", f"{probability:.1%}")
+                
+                # Recommendation
+                st.markdown("### 💡 Clinical Recommendation")
+                st.info(result['recommendation'])
+                
+                # Key Risk Factors
+                st.markdown("### 🔍 Key Risk Factors")
+                top_factors = []
+                if previous_bleeding:
+                    top_factors.append("📌 Previous bleeding history")
+                if liver_disease:
+                    top_factors.append("📌 Liver disease")
+                if renal_disease:
+                    top_factors.append("📌 Renal disease")
+                if amiodarone_use:
+                    top_factors.append("📌 Amiodarone use")
+                if antiplatelet_use:
+                    top_factors.append("📌 Antiplatelet medication use")
+                if most_recent_inr > 3.0:
+                    top_factors.append(f"📌 High INR ({most_recent_inr})")
+                if cyp2c9_genotype in ["*1/*3", "*2/*2", "*2/*3", "*3/*3"]:
+                    top_factors.append(f"📌 CYP2C9 {cyp2c9_genotype} (poor metabolizer)")
+                if vkorc1_genotype in ["AG", "AA"]:
+                    top_factors.append(f"📌 VKORC1 {vkorc1_genotype} (high sensitivity)")
+                
+                if top_factors:
+                    for factor in top_factors[:6]:
+                        st.write(factor)
+                else:
+                    st.write("✅ No major risk factors identified")
         
         else:
             # Default view before submission
             st.info("👆 Please fill out the patient information form and click 'Predict Bleeding Risk' to see the assessment.")
             
-            # Display feature importance chart
-            st.markdown("### 📈 Model Feature Importance")
-            feature_importance = pd.DataFrame({
-                'feature': ['Age', 'Sex', 'Previous Bleed', 'Hypertension', 'Renal Disease', 
-                           'Liver Disease', 'Amiodarone', 'Antiplatelet', 'CYP2C9', 'VKORC1', 
-                           'INR', 'Warfarin Dose'],
-                'importance': model.feature_importances_
-            }).sort_values('importance', ascending=True)
+            # Display model info
+            st.markdown("### ℹ️ Model Information")
+            st.write(f"**Model Type:** Random Forest Classifier")
+            st.write(f"**Number of Features:** {len(feature_columns)}")
+            st.write(f"**Trained on:** Egyptian patient population")
             
-            fig = px.bar(feature_importance, x='importance', y='feature', 
-                        orientation='h', title='Feature Importance in Prediction')
-            st.plotly_chart(fig, use_container_width=True)
+            # Feature importance (if available)
+            try:
+                feature_importance = pd.DataFrame({
+                    'feature': feature_columns,
+                    'importance': model.feature_importances_
+                }).sort_values('importance', ascending=True)
+                
+                st.markdown("### 📈 Feature Importance")
+                fig = px.bar(feature_importance, x='importance', y='feature', 
+                            orientation='h', title='Feature Importance in Prediction')
+                st.plotly_chart(fig, use_container_width=True)
+            except Exception as e:
+                st.warning("Could not display feature importance chart")
 
     # Footer
     st.markdown("---")
     st.markdown("""
     **Disclaimer**: This tool is for educational and research purposes only. 
     Clinical decisions should be made by qualified healthcare professionals.
+    
+    **Technical Info**: Built with Streamlit, Scikit-learn, and Plotly
     """)
 
 if __name__ == "__main__":
